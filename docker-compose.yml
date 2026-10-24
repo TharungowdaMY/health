@@ -1,0 +1,38 @@
+# Local / single-server stack: PostgreSQL + the FastAPI app.
+#   cp .env.example .env     (then edit the secrets)
+#   docker compose up --build
+# App:  http://localhost:8000      API docs: http://localhost:8000/docs
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-delta}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-delta_health}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    # No published port: only the API container (same Docker network) can reach the database.
+    # To inspect it:  docker compose exec db psql -U delta -d delta_health
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build: ./backend
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DELTA_HEALTH_ENV: ${DELTA_HEALTH_ENV:-development}
+      DELTA_HEALTH_SECRET: ${DELTA_HEALTH_SECRET:?set DELTA_HEALTH_SECRET in .env}
+      DELTA_HEALTH_DB: postgresql+psycopg2://${POSTGRES_USER:-delta}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-delta_health}
+      SEED_DEMO_DATA: ${SEED_DEMO_DATA:-false}
+    ports:
+      - "127.0.0.1:8000:8000"   # localhost only; in production Caddy proxies to it
+
+volumes:
+  pgdata:
